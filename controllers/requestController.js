@@ -12,6 +12,10 @@ export const requestToBuy = async (req, res) => {
       return res.status(404).json({ message: "Asset not found" });
     }
 
+    if (asset.status !== "published") {
+      return res.status(400).json({ message: "Asset not Published yet" });
+    }
+
     // Prevent the current holder from requesting to buy their own asset
     if (
       asset.currentHolder &&
@@ -94,7 +98,9 @@ export const acceptRequestByHolder = async (req, res) => {
       return res.status(404).json({ message: "Request not found" });
     }
 
-    const asset = request.assetId;
+    const asset = await Asset.findById(request.assetId).populate(
+      "currentHolder"
+    );
 
     // Prevent accepting a request that has already been accepted
     if (request.status !== "pending") {
@@ -105,7 +111,7 @@ export const acceptRequestByHolder = async (req, res) => {
     }
 
     // Prevent the current holder from accepting a request from themselves
-    if (asset.currentHolder?.toString() === request.buyer._id.toString()) {
+    if (asset.currentHolder?._id.toString() === request.buyer._id.toString()) {
       return res
         .status(400)
         .json({ message: "You cannot accept your own request." });
@@ -117,6 +123,8 @@ export const acceptRequestByHolder = async (req, res) => {
     asset.numberOfTransfers += 1;
 
     await asset.save();
+
+    await asset.populate("currentHolder");
 
     // Mark all other requests for this asset as "closed"
     await Request.updateMany(
@@ -171,6 +179,8 @@ export const acceptRequestByBuyer = async (req, res) => {
 
     await asset.save();
 
+    await asset.populate("currentHolder");
+
     // Mark all other requests for this asset as "closed"
     await Request.updateMany(
       { assetId: asset._id, status: "pending" },
@@ -192,6 +202,17 @@ export const acceptRequestByBuyer = async (req, res) => {
 // Deny a purchase request
 export const denyRequest = async (req, res) => {
   try {
+    const request = await Request.findById(req.params.id).populate("buyer");
+
+    if (!request) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    if (req.user._id.toString() === request.buyer._id.toString()) {
+      return res
+        .status(400)
+        .json({ message: "You cannot deny your own request." });
+    }
     await Request.findByIdAndUpdate(req.params.id, { status: "denied" });
     res.json({ message: "Request denied" });
   } catch (error) {
